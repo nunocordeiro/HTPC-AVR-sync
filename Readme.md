@@ -57,4 +57,18 @@ Output: `bin\<Configuration>\HTPCAVRVolume.exe`
 
 ## Credits
 
-Based on [HTPCAVRVolume](https://github.com/nicko88/HTPCAVRVolume) by nicko88.
+HTPC-AVR-sync is a fork of [HTPCAVRVolume](https://github.com/nicko88/HTPCAVRVolume) by [nicko88](https://github.com/nicko88), which provided the original proof-of-concept for intercepting Windows volume hotkeys and forwarding them to a Denon/Marantz AVR over Telnet.
+
+The following was built on top of that foundation:
+
+- **Persistent Telnet connection** — replaced the per-command connect/disconnect with a long-lived TCP connection and a background reader thread, eliminating the latency spike on every key press
+- **Real-time AVR feedback** — the reader thread parses every line the AVR sends, so mute state, volume level, and power state stay in sync without polling
+- **Absolute volume commands** — instead of sending MVUP/MVDOWN (incremental), the app now tracks volume locally and sends a single absolute `MV{level}` command per roller burst, making fast scrolling reliable and preventing drift
+- **Logitech roller debouncing** — notches are accumulated for 80 ms and sent as one command, so spinning the roller quickly sends one update instead of dozens
+- **Dynamic volume range** — the Denon's actual floor and ceiling are learned from the `MVMAX` response on connect; no more hard-coded limits that cause the AVR to silently ignore out-of-range commands
+- **60-second keep-alive** — a periodic `PW?` ping prevents the AVR's network interface from entering deep sleep and dropping the HDMI handshake
+- **TV power sync** — polls a Samsung TV's REST API every 5 seconds; when the TV turns on, the AVR powers on after a 2-second delay (so the GPU sees the TV's EDID before the AVR comes online, preventing Windows from defaulting to a generic 1024×768 resolution); powers off when the TV does
+- **Auto-reconnect** — if the TCP connection drops, the app reconnects automatically after 10 seconds
+- **Headphone detection** — monitors the Windows default audio endpoint via Core Audio COM; hotkeys are automatically suspended when headphones or any non-AVR output is active and resumed when the AVR output comes back
+- **Graceful error handling** — no message boxes; errors are logged in the UI; a tray notification only appears after 30 consecutive seconds of AVR failures
+- **Start with Windows** — one-click autostart via the registry, exposed as a checkbox in the UI

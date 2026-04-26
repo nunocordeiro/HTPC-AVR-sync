@@ -102,10 +102,16 @@ namespace HTPCAVRVolume
                 cmbDevice.SelectedItem = deviceType;
                 tbIP.Text = ip;
 
+                // Dispose previous device (DenonMarantz holds a persistent connection)
+                (_AVR as IDisposable)?.Dispose();
+                _AVR = null;
+
                 switch (deviceType)
                 {
                     case "DenonMarantz":
-                        _AVR = new AVRDevices.DenonMarantzDevice(ip);
+                        var denon = new AVRDevices.DenonMarantzDevice(ip);
+                        denon.StatusChanged += msg => AppendLog(msg);
+                        _AVR = denon;
                         break;
                     case "StormAudio":
                         _AVR = new AVRDevices.StormAudioDevice(ip);
@@ -152,8 +158,12 @@ namespace HTPCAVRVolume
 
         private void OnTVTurnedOn(object sender, EventArgs e)
         {
-            AppendLog("TV turned on — sending PowerOn to AVR");
-            SendAVRCommand(() => _AVR.PowerOn());
+            // Feature 5: TV wakes first; wait 2 s before powering on the AVR so
+            // the GPU sees the TV's EDID before the AVR comes online, preventing
+            // Windows from falling back to a generic 1024x768 resolution.
+            AppendLog("TV turned on — powering on AVR in 2 s");
+            var avr = _AVR;
+            Task.Delay(2000).ContinueWith(_ => SendAVRCommand(() => avr.PowerOn()));
             UpdateTVStatus("On");
         }
 
@@ -392,6 +402,7 @@ namespace HTPCAVRVolume
         {
             _tvMonitor?.Dispose();
             _audioMonitor?.Dispose();
+            (_AVR as IDisposable)?.Dispose();
             UnregisterHotkeys();
         }
 
