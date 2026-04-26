@@ -7,4 +7,4 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 echo.
-echo Build succeeded -^> bin\Release\HTPCAVRVolume.exe
+echo Build succeeded -^> bin\Release\HTPC-AVR-sync.exe

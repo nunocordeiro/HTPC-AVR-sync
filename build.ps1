@@ -81,10 +81,10 @@ if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
 }
 
 # Confirm the output file actually exists as a definitive success check
-if (-not (Test-Path "$OutputDir\HTPCAVRVolume.exe")) {
-    Write-Error "Build appeared to succeed but exe not found at $OutputDir\HTPCAVRVolume.exe"
+if (-not (Test-Path "$OutputDir\HTPC-AVR-sync.exe")) {
+    Write-Error "Build appeared to succeed but exe not found at $OutputDir\HTPC-AVR-sync.exe"
     exit 1
 }
 
 Write-Host ""
-Write-Host "Build succeeded -> $OutputDir\HTPCAVRVolume.exe" -ForegroundColor Green
+Write-Host "Build succeeded -> $OutputDir\HTPC-AVR-sync.exe" -ForegroundColor Green
