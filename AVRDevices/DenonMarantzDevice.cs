@@ -41,7 +41,8 @@ namespace HTPCAVRVolume.AVRDevices
         private const int   DebounceMs   = 80;   // ms to wait after last notch before sending
         private const int   VolumeIdleMs = 1000; // ms idle before accepting AVR vol feedback
 
-        public event Action<string> StatusChanged;
+        public event Action<string>        StatusChanged;
+        public event Action<float, float, float> VolumeChanged; // (level, min, max)
 
         public DenonMarantzDevice(string ip)
         {
@@ -182,15 +183,21 @@ namespace HTPCAVRVolume.AVRDevices
 
         private void AccumulateVolume(float delta)
         {
+            float level, min, max;
             lock (_volumeLock)
             {
                 _lastVolInput = DateTime.Now;
                 _volumeLevel  = Math.Max(VolumeMin, Math.Min(_volumeMax, _volumeLevel + delta));
+                level = _volumeLevel;
+                min   = VolumeMin;
+                max   = _volumeMax;
 
                 _volumeDebounceTimer?.Dispose();
                 _volumeDebounceTimer = new System.Threading.Timer(
                     _ => FlushVolume(), null, DebounceMs, Timeout.Infinite);
             }
+            // Fire immediately so the OSD appears with no perceptible delay
+            VolumeChanged?.Invoke(level, min, max);
         }
 
         private void FlushVolume()

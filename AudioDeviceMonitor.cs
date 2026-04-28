@@ -9,10 +9,37 @@ namespace HTPCAVRVolume
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
     internal class MMDeviceEnumeratorCoClass { }
 
+    [Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMMDeviceCollection
+    {
+        [PreserveSig] int GetCount(out uint pcDevices);
+        [PreserveSig] int Item(uint nDevice, out IMMDevice ppDevice);
+    }
+
+    [Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint cProps);
+        [PreserveSig] int GetAt(uint iProp, out PropertyKey pkey);
+        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant pv);
+        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant propvar);
+        [PreserveSig] int Commit();
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    internal struct PropVariant
+    {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pwszVal;
+        // VT_LPWSTR = 31
+        public string AsString() => vt == 31 ? Marshal.PtrToStringUni(pwszVal) : null;
+    }
+
     [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceEnumerator
     {
-        int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IntPtr ppDevices);
+        [PreserveSig]
+        int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IMMDeviceCollection ppDevices);
         [PreserveSig]
         int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);
         int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string pwstrId, out IMMDevice ppDevice);
@@ -27,7 +54,8 @@ namespace HTPCAVRVolume
     {
         [PreserveSig]
         int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
-        int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
+        [PreserveSig]
+        int OpenPropertyStore(int stgmAccess, out IPropertyStore ppProperties);
         [PreserveSig]
         int GetId([MarshalAs(UnmanagedType.LPWStr)] out string ppstrId);
         int GetState(out int pdwState);
@@ -98,17 +126,99 @@ namespace HTPCAVRVolume
             _enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorCoClass();
         }
 
-        public void Start(string avrDeviceId)
+        // Returns the resolved device ID — may differ from avrDeviceId if the GUID
+        // changed and we recovered via the saved device name.
+        public string Start(string avrDeviceId, string avrDeviceName = null)
         {
             if (_monitoring)
                 _enumerator.UnregisterEndpointNotificationCallback(this);
 
             _avrDeviceId = avrDeviceId;
             string current = GetCurrentDefaultDeviceId();
-            _avrActive = current == avrDeviceId;
-            Logger.Log($"AudioMonitor.Start: avrId={avrDeviceId}, currentId={current}, avrActive={_avrActive}");
+
+            // If the saved GUID no longer matches, try to find the device by name.
+            // This self-heals when Windows re-enumerates the audio device (e.g. after
+            // a driver update or AVR power cycle) and assigns a new GUID.
+            if (current != avrDeviceId && !string.IsNullOrEmpty(avrDeviceName))
+            {
+                string resolvedId = FindDeviceIdByName(avrDeviceName);
+                if (!string.IsNullOrEmpty(resolvedId) && resolvedId != avrDeviceId)
+                {
+                    Logger.Log($"AudioMonitor: GUID changed — resolved '{avrDeviceName}' -> {resolvedId}");
+                    _avrDeviceId = resolvedId;
+                }
+            }
+
+            _avrActive = current == _avrDeviceId;
+            Logger.Log($"AudioMonitor.Start: avrId={_avrDeviceId}, currentId={current}, avrActive={_avrActive}");
             _enumerator.RegisterEndpointNotificationCallback(this);
             _monitoring = true;
+            return _avrDeviceId;
+        }
+
+        // PKEY_Device_FriendlyName = {A45C254E-DF1C-4EFD-8020-67D146A850E0}, pid=14
+        private static readonly PropertyKey PkeyFriendlyName = new PropertyKey
+        {
+            fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"),
+            pid   = 14
+        };
+
+        public static string GetDeviceFriendlyName(string deviceId)
+        {
+            if (string.IsNullOrEmpty(deviceId)) return null;
+            try
+            {
+                var en = (IMMDeviceEnumerator)new MMDeviceEnumeratorCoClass();
+                if (en.GetDevice(deviceId, out IMMDevice dev) != 0) { Marshal.ReleaseComObject(en); return null; }
+                string name = GetFriendlyName(dev);
+                Marshal.ReleaseComObject(dev);
+                Marshal.ReleaseComObject(en);
+                return name;
+            }
+            catch { return null; }
+        }
+
+        private static string GetFriendlyName(IMMDevice device)
+        {
+            try
+            {
+                var key = PkeyFriendlyName;
+                if (device.OpenPropertyStore(0 /*STGM_READ*/, out IPropertyStore store) != 0) return null;
+                store.GetValue(ref key, out PropVariant pv);
+                string name = pv.AsString();
+                Marshal.ReleaseComObject(store);
+                return name;
+            }
+            catch { return null; }
+        }
+
+        // Returns the device ID of the first active render endpoint whose friendly
+        // name contains namePart (case-insensitive).
+        public static string FindDeviceIdByName(string namePart)
+        {
+            if (string.IsNullOrEmpty(namePart)) return null;
+            try
+            {
+                var en = (IMMDeviceEnumerator)new MMDeviceEnumeratorCoClass();
+                en.EnumAudioEndpoints(EDataFlowRender, 0x1 /*DEVICE_STATE_ACTIVE*/, out IMMDeviceCollection col);
+                col.GetCount(out uint count);
+                string found = null;
+                for (uint i = 0; i < count && found == null; i++)
+                {
+                    col.Item(i, out IMMDevice dev);
+                    string name = GetFriendlyName(dev);
+                    if (name != null && name.IndexOf(namePart, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        dev.GetId(out found);
+                        Logger.Log($"FindDeviceIdByName: '{namePart}' matched '{name}' -> {found}");
+                    }
+                    Marshal.ReleaseComObject(dev);
+                }
+                Marshal.ReleaseComObject(col);
+                Marshal.ReleaseComObject(en);
+                return found;
+            }
+            catch { return null; }
         }
 
         public void Stop()

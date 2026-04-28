@@ -24,6 +24,7 @@ namespace HTPCAVRVolume
         private AVRDevices.IAVRDevice _AVR;
         private AudioDeviceMonitor _audioMonitor;
         private TVMonitor _tvMonitor;
+        private VolumeOSD _volumeOSD;
 
         public HTPCAVRVolume()
         {
@@ -33,6 +34,8 @@ namespace HTPCAVRVolume
 
             string version = Assembly.GetExecutingAssembly().GetName().Version.ToString(3).Replace(".0", "");
             Text = $"HTPC-AVR-sync v{version}";
+
+            _volumeOSD = new VolumeOSD();
         }
 
         private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -110,7 +113,8 @@ namespace HTPCAVRVolume
                 {
                     case "DenonMarantz":
                         var denon = new AVRDevices.DenonMarantzDevice(ip);
-                        denon.StatusChanged += msg => AppendLog(msg);
+                        denon.StatusChanged  += msg => AppendLog(msg);
+                        denon.VolumeChanged  += (level, min, max) => _volumeOSD.ShowVolume(level, min, max);
                         _AVR = denon;
                         break;
                     case "StormAudio":
@@ -118,7 +122,8 @@ namespace HTPCAVRVolume
                         break;
                 }
 
-                string audioDeviceId = null;
+                string audioDeviceId   = null;
+                string audioDeviceName = null;
                 string tvIp = null;
                 for (int i = 1; i < lines.Length; i++)
                 {
@@ -126,12 +131,18 @@ namespace HTPCAVRVolume
                     if (eq < 0) continue;
                     string key = lines[i].Substring(0, eq);
                     string val = lines[i].Substring(eq + 1);
-                    if (key == "AudioDevice") audioDeviceId = val;
+                    if (key == "AudioDevice")
+                    {
+                        // Format: id|FriendlyName  (pipe-separated; legacy entries have no pipe)
+                        int pipe = val.IndexOf('|');
+                        if (pipe >= 0) { audioDeviceId = val.Substring(0, pipe); audioDeviceName = val.Substring(pipe + 1); }
+                        else             audioDeviceId = val;
+                    }
                     if (key == "TVIP") tvIp = val;
                 }
 
                 if (tvIp != null) tbTVIP.Text = tvIp;
-                StartAudioMonitoring(audioDeviceId);
+                StartAudioMonitoring(audioDeviceId, audioDeviceName);
                 StartTVMonitoring(tvIp);
                 return true;
             }
@@ -179,7 +190,7 @@ namespace HTPCAVRVolume
             lblTVStatus.Text = "TV: " + status;
         }
 
-        private void StartAudioMonitoring(string audioDeviceId)
+        private void StartAudioMonitoring(string audioDeviceId, string audioDeviceName = null)
         {
             _audioMonitor?.Dispose();
             _audioMonitor = null;
@@ -194,7 +205,15 @@ namespace HTPCAVRVolume
             _audioMonitor = new AudioDeviceMonitor(this);
             _audioMonitor.AVRBecameActive += OnAVRBecameActive;
             _audioMonitor.AVRBecameInactive += OnAVRBecameInactive;
-            _audioMonitor.Start(audioDeviceId);
+            string resolvedId = _audioMonitor.Start(audioDeviceId, audioDeviceName);
+
+            // If Start() resolved the device to a new GUID via name matching,
+            // persist the updated ID to config so future starts don't need to re-resolve.
+            if (resolvedId != audioDeviceId && !string.IsNullOrEmpty(resolvedId))
+            {
+                AppendLog($"Device GUID changed — auto-saving updated ID");
+                SaveAudioDeviceToConfig(resolvedId, audioDeviceName);
+            }
 
             if (_audioMonitor.IsAVRActive)
             {
@@ -211,9 +230,23 @@ namespace HTPCAVRVolume
         private void RegisterHotkeys()
         {
             if (_hotkeysRegistered) return;
-            hookVolUp.Register();
-            hookVolDown.Register();
-            hookToggleMute.Register();
+            bool up   = hookVolUp.Register();
+            bool down = hookVolDown.Register();
+            bool mute = hookToggleMute.Register();
+            Logger.Log($"RegisterHotkeys: up={up} down={down} mute={mute}");
+            if (!up || !down || !mute)
+            {
+                // Registration failed — another app holds the keys.
+                // Unregister any that did succeed and schedule a retry.
+                if (up)   hookVolUp.Unregister();
+                if (down) hookVolDown.Unregister();
+                if (mute) hookToggleMute.Unregister();
+                AppendLog("Hotkey registration failed — will retry in 5 s (another app may hold the keys)");
+                var t = new System.Windows.Forms.Timer { Interval = 5000 };
+                t.Tick += (s, e) => { t.Stop(); t.Dispose(); RegisterHotkeys(); };
+                t.Start();
+                return;
+            }
             _hotkeysRegistered = true;
         }
 
@@ -224,6 +257,7 @@ namespace HTPCAVRVolume
             hookVolDown.Unregister();
             hookToggleMute.Unregister();
             _hotkeysRegistered = false;
+            Logger.Log("UnregisterHotkeys: done");
         }
 
         private void OnAVRBecameActive(object sender, EventArgs e)
@@ -303,15 +337,35 @@ namespace HTPCAVRVolume
             return (Keys)((LParam.ToInt32()) >> 16);
         }
 
+        private void SaveAudioDeviceToConfig(string deviceId, string deviceName)
+        {
+            try
+            {
+                // Re-read current config to preserve AVR type/IP/TVIP, only update AudioDevice line
+                string[] lines = File.Exists(_configPath) ? File.ReadAllLines(_configPath) : new string[0];
+                string avrLine  = lines.Length > 0 ? lines[0] : (cmbDevice.SelectedItem?.ToString() + "=" + tbIP.Text);
+                string tvLine   = "TVIP=" + tbTVIP.Text.Trim();
+                string audioVal = string.IsNullOrEmpty(deviceName) ? deviceId : deviceId + "|" + deviceName;
+                File.WriteAllText(_configPath,
+                    avrLine + "\r\nAudioDevice=" + audioVal + "\r\n" + tvLine);
+            }
+            catch { }
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             try
             {
-                string audioDeviceId = AudioDeviceMonitor.GetCurrentDefaultDeviceId() ?? "";
+                string audioDeviceId   = AudioDeviceMonitor.GetCurrentDefaultDeviceId() ?? "";
+                string audioDeviceName = AudioDeviceMonitor.GetDeviceFriendlyName(audioDeviceId) ?? "";
+                string audioVal        = string.IsNullOrEmpty(audioDeviceName)
+                    ? audioDeviceId
+                    : audioDeviceId + "|" + audioDeviceName;
                 string configText = cmbDevice.SelectedItem.ToString() + "=" + tbIP.Text
-                    + "\r\nAudioDevice=" + audioDeviceId
+                    + "\r\nAudioDevice=" + audioVal
                     + "\r\nTVIP=" + tbTVIP.Text.Trim();
                 File.WriteAllText(_configPath, configText);
+                Logger.Log($"Saved audio device: {audioDeviceName} ({audioDeviceId})");
                 LoadDevice();
             }
             catch
@@ -403,6 +457,7 @@ namespace HTPCAVRVolume
             _tvMonitor?.Dispose();
             _audioMonitor?.Dispose();
             (_AVR as IDisposable)?.Dispose();
+            _volumeOSD?.Dispose();
             UnregisterHotkeys();
         }
 

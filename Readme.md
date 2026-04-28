@@ -9,6 +9,7 @@ When you use audio bit-streaming (Dolby TrueHD, DTS-HD, Atmos, etc.), Windows' o
 ## Features
 
 - **Volume control** — VolumeUp / VolumeDown / Mute keys are intercepted and sent to the AVR
+- **Volume OSD** — a compact overlay appears in the top-right corner whenever volume changes, showing a level bar and number on a 0–100 scale, then fades out automatically
 - **Headphone detection** — hotkeys automatically pause when you switch to headphones or any non-AVR output, and resume when you switch back
 - **TV power sync** — polls your Samsung TV's REST API; when the TV turns on or off, the AVR follows automatically
 - **Start with Windows** — optional autostart via a checkbox (no manual registry editing)
@@ -72,3 +73,6 @@ The following was built on top of that foundation:
 - **Headphone detection** — monitors the Windows default audio endpoint via Core Audio COM; hotkeys are automatically suspended when headphones or any non-AVR output is active and resumed when the AVR output comes back
 - **Graceful error handling** — no message boxes; errors are logged in the UI; a tray notification only appears after 30 consecutive seconds of AVR failures
 - **Start with Windows** — one-click autostart via the registry, exposed as a checkbox in the UI
+- **Volume OSD** — a non-intrusive overlay (82×66 px, top-right corner) shows a vertical level bar and the current volume on a remapped 0–100 scale; values below 10 use half-step resolution (0.0, 0.5 … 9.5) for fine-grained feedback at low volumes; the OSD holds for 1.4 s then fades out smoothly
+- **Audio device persistence** — the selected audio device's friendly name is saved alongside its GUID; if Windows reassigns the GUID on reboot or driver update, the app resolves the correct device by name automatically without any user action
+- **Hotkey retry** — if hotkey registration fails at startup (another app momentarily holds the keys), the app retries silently every 5 seconds until it succeeds
