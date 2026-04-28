@@ -14,6 +14,7 @@ When you use audio bit-streaming (Dolby TrueHD, DTS-HD, Atmos, etc.), Windows' o
 - **TV power sync** — polls your Samsung TV's REST API; when the TV turns on or off, the AVR follows automatically
 - **Start with Windows** — optional autostart via a checkbox (no manual registry editing)
 - **Mute sync** — mute state is queried from the AVR before each toggle, so it stays in sync even if you mute from the AVR's own remote
+- **Keep audio device alive** — optional checkbox opens a silent background audio stream on the AVR endpoint, preventing Windows from power-gating the driver between playback sessions; exclusive-mode apps (bit-streaming players) are detected and the stream yields automatically, then re-opens when the app is done
 - **Graceful error handling** — failed commands are logged in the UI; a tray alert only fires after 30 seconds of continuous failures
 
 ## Supported AVRs
@@ -76,3 +77,5 @@ The following was built on top of that foundation:
 - **Volume OSD** — a non-intrusive overlay (82×66 px, top-right corner) shows a vertical level bar and the current volume on a remapped 0–100 scale; values below 10 use half-step resolution (0.0, 0.5 … 9.5) for fine-grained feedback at low volumes; the OSD holds for 1.4 s then fades out smoothly
 - **Audio device persistence** — the selected audio device's friendly name is saved alongside its GUID; if Windows reassigns the GUID on reboot or driver update, the app resolves the correct device by name automatically without any user action
 - **Hotkey retry** — if hotkey registration fails at startup (another app momentarily holds the keys), the app retries silently every 5 seconds until it succeeds
+- **Keep audio device alive** — a silent WASAPI shared-mode stream is held open on the AVR audio endpoint (opt-in checkbox) to prevent the Windows audio driver from power-gating the device between playback sessions; when an exclusive-mode application (e.g. a bit-streaming media player) takes the device, the keep-alive detects the session disconnect, yields cleanly, and reattaches automatically 10 seconds after the exclusive app releases the device
+- **Log rotation and trimming** — the log file is rotated to a `.bak` on startup if it exceeds 200 KB; a mid-session trim kicks in every 500 log writes and keeps only the most recent 1,000 lines if the file grows past 500 KB, so the log never grows unbounded even during weeks-long sessions

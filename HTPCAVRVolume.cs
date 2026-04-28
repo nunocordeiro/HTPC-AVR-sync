@@ -25,6 +25,8 @@ namespace HTPCAVRVolume
         private AudioDeviceMonitor _audioMonitor;
         private TVMonitor _tvMonitor;
         private VolumeOSD _volumeOSD;
+        private AudioKeepAlive _keepAlive;
+        private string _avrAudioDeviceId;   // resolved device ID for the AVR audio endpoint
 
         public HTPCAVRVolume()
         {
@@ -124,7 +126,8 @@ namespace HTPCAVRVolume
 
                 string audioDeviceId   = null;
                 string audioDeviceName = null;
-                string tvIp = null;
+                string tvIp    = null;
+                bool keepAlive = false;
                 for (int i = 1; i < lines.Length; i++)
                 {
                     int eq = lines[i].IndexOf('=');
@@ -138,10 +141,12 @@ namespace HTPCAVRVolume
                         if (pipe >= 0) { audioDeviceId = val.Substring(0, pipe); audioDeviceName = val.Substring(pipe + 1); }
                         else             audioDeviceId = val;
                     }
-                    if (key == "TVIP") tvIp = val;
+                    if (key == "TVIP")      tvIp    = val;
+                    if (key == "KeepAlive") keepAlive = val == "1";
                 }
 
                 if (tvIp != null) tbTVIP.Text = tvIp;
+                chkKeepAlive.Checked = keepAlive;
                 StartAudioMonitoring(audioDeviceId, audioDeviceName);
                 StartTVMonitoring(tvIp);
                 return true;
@@ -215,10 +220,13 @@ namespace HTPCAVRVolume
                 SaveAudioDeviceToConfig(resolvedId, audioDeviceName);
             }
 
+            _avrAudioDeviceId = resolvedId ?? audioDeviceId;
+
             if (_audioMonitor.IsAVRActive)
             {
                 RegisterHotkeys();
                 UpdateAudioStatus("Active");
+                StartKeepAliveIfEnabled();
             }
             else
             {
@@ -280,6 +288,7 @@ namespace HTPCAVRVolume
                 };
                 timer.Start();
 
+                StartKeepAliveIfEnabled();
                 Logger.Log("OnAVRBecameActive: done");
             }
             catch (Exception ex)
@@ -294,12 +303,38 @@ namespace HTPCAVRVolume
             try
             {
                 UnregisterHotkeys();
+                StopKeepAlive();
                 UpdateAudioStatus("Inactive (hotkeys paused)");
                 Logger.Log("OnAVRBecameInactive: done");
             }
             catch (Exception ex)
             {
                 Logger.LogException("OnAVRBecameInactive", ex);
+            }
+        }
+
+        private void StartKeepAliveIfEnabled()
+        {
+            StopKeepAlive();
+            if (chkKeepAlive.Checked && !string.IsNullOrEmpty(_avrAudioDeviceId))
+            {
+                _keepAlive = new AudioKeepAlive(_avrAudioDeviceId);
+                AppendLog("Keep-alive: started");
+            }
+        }
+
+        private void StopKeepAlive()
+        {
+            _keepAlive?.Dispose();
+            _keepAlive = null;
+        }
+
+        private void ChkKeepAlive_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_audioMonitor != null && _audioMonitor.IsAVRActive)
+            {
+                if (chkKeepAlive.Checked) StartKeepAliveIfEnabled();
+                else                      StopKeepAlive();
             }
         }
 
@@ -363,7 +398,8 @@ namespace HTPCAVRVolume
                     : audioDeviceId + "|" + audioDeviceName;
                 string configText = cmbDevice.SelectedItem.ToString() + "=" + tbIP.Text
                     + "\r\nAudioDevice=" + audioVal
-                    + "\r\nTVIP=" + tbTVIP.Text.Trim();
+                    + "\r\nTVIP=" + tbTVIP.Text.Trim()
+                    + "\r\nKeepAlive=" + (chkKeepAlive.Checked ? "1" : "0");
                 File.WriteAllText(_configPath, configText);
                 Logger.Log($"Saved audio device: {audioDeviceName} ({audioDeviceId})");
                 LoadDevice();
@@ -440,6 +476,9 @@ namespace HTPCAVRVolume
 
         // ── UI log ────────────────────────────────────────────────────────────
 
+        private const int LogUiMaxLines  = 100;
+        private const int LogUiTrimLines = 20;   // drop this many oldest lines when the cap is hit
+
         private void AppendLog(string message)
         {
             string line = $"[{DateTime.Now:HH:mm:ss}] {message}";
@@ -448,6 +487,15 @@ namespace HTPCAVRVolume
                 BeginInvoke((Action)(() =>
                 {
                     rtbLog.AppendText(line + Environment.NewLine);
+
+                    // Trim oldest lines so the in-memory control never grows unbounded.
+                    if (rtbLog.Lines.Length > LogUiMaxLines)
+                    {
+                        string[] kept = new string[rtbLog.Lines.Length - LogUiTrimLines];
+                        Array.Copy(rtbLog.Lines, LogUiTrimLines, kept, 0, kept.Length);
+                        rtbLog.Lines = kept;
+                    }
+
                     rtbLog.ScrollToCaret();
                 }));
         }
@@ -458,6 +506,7 @@ namespace HTPCAVRVolume
             _audioMonitor?.Dispose();
             (_AVR as IDisposable)?.Dispose();
             _volumeOSD?.Dispose();
+            StopKeepAlive();
             UnregisterHotkeys();
         }
 
