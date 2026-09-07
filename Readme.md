@@ -11,7 +11,7 @@ When you use audio bit-streaming (Dolby TrueHD, DTS-HD, Atmos, etc.), Windows' o
 - **Volume control** — VolumeUp / VolumeDown / Mute keys are intercepted and sent to the AVR
 - **Volume OSD** — a compact overlay appears in the top-right corner whenever volume changes, showing a level bar and number on a 0–100 scale, then fades out automatically
 - **Headphone detection** — hotkeys automatically pause when you switch to headphones or any non-AVR output, and resume when you switch back
-- **TV power sync** — polls your Samsung TV's REST API; when the TV turns on or off, the AVR follows automatically
+- **TV power sync** — polls your Samsung TV's REST API; when the TV turns on or off, the AVR follows automatically. A failed poll is never read as "off" - the last known state is held until three consecutive failures, so one slow answer from the TV cannot drop the AVR mid-viewing
 - **Start with Windows** — optional autostart via a checkbox (no manual registry editing)
 - **Mute sync** — mute state is queried from the AVR before each toggle, so it stays in sync even if you mute from the AVR's own remote
 - **Keep audio device alive** — optional checkbox opens a silent background audio stream on the AVR endpoint, preventing Windows from power-gating the driver between playback sessions; exclusive-mode apps (bit-streaming players) are detected and the stream yields automatically, then re-opens when the app is done
@@ -69,7 +69,7 @@ The following was built on top of that foundation:
 - **Logitech roller debouncing** — notches are accumulated for 80 ms and sent as one command, so spinning the roller quickly sends one update instead of dozens
 - **Dynamic volume range** — the Denon's actual floor and ceiling are learned from the `MVMAX` response on connect; no more hard-coded limits that cause the AVR to silently ignore out-of-range commands
 - **60-second keep-alive** — a periodic `PW?` ping prevents the AVR's network interface from entering deep sleep and dropping the HDMI handshake
-- **TV power sync** — polls a Samsung TV's REST API every 5 seconds; when the TV turns on, the AVR powers on after a 2-second delay (so the GPU sees the TV's EDID before the AVR comes online, preventing Windows from defaulting to a generic 1024×768 resolution); powers off when the TV does
+- **TV power sync** — polls a Samsung TV's REST API every 5 seconds; when the TV turns on, the AVR powers on after a 2-second delay (so the GPU sees the TV's EDID before the AVR comes online, preventing Windows from defaulting to a generic 1024×768 resolution); powers off when the TV does. Since v3.1 a probe is tri-state: a parsed "standby" powers the AVR off at once, but a timeout counts as *unknown* and only three consecutive failures (~15 s) are treated as a real power-off. That preserves the off-at-the-wall case while fixing a roughly weekly false PowerOff, where a single slow response from the TV's REST service dropped the AVR under a TV that had never left "on" and cost a ~3 s HDMI blip
 - **Auto-reconnect** — if the TCP connection drops, the app reconnects automatically after 10 seconds
 - **Headphone detection** — monitors the Windows default audio endpoint via Core Audio COM; hotkeys are automatically suspended when headphones or any non-AVR output is active and resumed when the AVR output comes back
 - **Graceful error handling** — no message boxes; errors are logged in the UI; a tray notification only appears after 30 consecutive seconds of AVR failures
