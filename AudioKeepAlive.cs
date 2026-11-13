@@ -29,6 +29,7 @@ namespace HTPCAVRVolume
 
         public void Dispose()
         {
+            Logger.Log("KeepAlive: Dispose() called");
             _disposed = true;
             _retryNow.Set();   // unblock any Wait so the thread exits promptly
         }
@@ -46,17 +47,19 @@ namespace HTPCAVRVolume
                 {
                     // Wait up to 10 s; OnDisconnected fires _retryNow early so we
                     // reopen quickly after an exclusive-mode app finishes.
+                    Logger.Log("KeepAlive: waiting 10 s before retry");
                     _retryNow.Wait(10_000);
                     _retryNow.Reset();
                 }
             }
+            Logger.Log("KeepAlive: RunLoop exiting (disposed)");
         }
 
         private void TryRunStream()
         {
             // ── Get device ────────────────────────────────────────────────────
             IMMDevice device = GetDevice(_deviceId);
-            if (device == null) return;   // AVR off or not enumerated yet
+            if (device == null) { Logger.Log("KeepAlive: device not found — skipping retry"); return; }
 
             try
             {
@@ -96,13 +99,15 @@ namespace HTPCAVRVolume
 
             // ── Render client ─────────────────────────────────────────────────
             var iidRender = new Guid("F294ACFC-3146-4483-A7BF-ADDCA7C260E2");
-            client.GetService(ref iidRender, out IntPtr renderPtr);
+            int hrRender = client.GetService(ref iidRender, out IntPtr renderPtr);
+            if (hrRender != 0 || renderPtr == IntPtr.Zero) { Logger.Log($"KeepAlive: GetService(Render) failed 0x{hrRender:X8}"); return; }
             var render = (IAudioRenderClient)Marshal.GetObjectForIUnknown(renderPtr);
             Marshal.Release(renderPtr);
 
             // ── Session events (detect exclusive-mode override) ───────────────
             var iidSession = new Guid("F4B1A599-7266-4319-A8CA-E70ACB11E8CD");
-            client.GetService(ref iidSession, out IntPtr sessionPtr);
+            int hrSession = client.GetService(ref iidSession, out IntPtr sessionPtr);
+            if (hrSession != 0 || sessionPtr == IntPtr.Zero) { Logger.Log($"KeepAlive: GetService(Session) failed 0x{hrSession:X8}"); Marshal.ReleaseComObject(render); return; }
             var session = (IAudioSessionControl)Marshal.GetObjectForIUnknown(sessionPtr);
             Marshal.Release(sessionPtr);
 
@@ -116,19 +121,25 @@ namespace HTPCAVRVolume
             client.Start();
             Logger.Log($"KeepAlive: stream started ({bufferFrames} frames)");
 
+            string stopReason = "disposed";
             try
             {
                 while (!_disposed && !events.Disconnected)
                 {
                     Thread.Sleep(200);
 
-                    if (client.GetCurrentPadding(out uint padding) != 0) break;
+                    int hrPad = client.GetCurrentPadding(out uint padding);
+                    if (hrPad != 0) { stopReason = $"GetCurrentPadding 0x{hrPad:X8}"; break; }
                     uint available = bufferFrames - padding;
                     if (available == 0) continue;
 
-                    if (render.GetBuffer(available, out _) != 0) break;
+                    int hrBuf = render.GetBuffer(available, out _);
+                    if (hrBuf != 0) { stopReason = $"GetBuffer 0x{hrBuf:X8}"; break; }
                     render.ReleaseBuffer(available, SILENT);
                 }
+                if (events.Disconnected)
+                    stopReason = "session disconnected";
+                // else: WASAPI error (stopReason set above) or _disposed
             }
             finally
             {
@@ -136,7 +147,7 @@ namespace HTPCAVRVolume
                 session.UnregisterAudioSessionNotification(events);
                 Marshal.ReleaseComObject(session);
                 Marshal.ReleaseComObject(render);
-                Logger.Log("KeepAlive: stream stopped");
+                Logger.Log($"KeepAlive: stream stopped — reason={stopReason}");
             }
         }
 
@@ -234,7 +245,9 @@ namespace HTPCAVRVolume
 
             public void OnSessionDisconnected(int reason)
             {
-                // reason 4 = DisconnectReasonExclusiveModeOverride (bit-streaming player)
+                // DisconnectReason: 0=DeviceRemoval, 1=ServerShutdown, 2=FormatChanged,
+                // 3=SessionLogoff, 4=SessionDisconnected, 5=ExclusiveModeOverride
+                Logger.Log($"KeepAlive: OnSessionDisconnected reason={reason}");
                 Disconnected = true;
                 _owner.OnDisconnected();
             }

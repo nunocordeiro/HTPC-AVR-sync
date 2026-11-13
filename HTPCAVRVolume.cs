@@ -323,10 +323,14 @@ namespace HTPCAVRVolume
             }
         }
 
-        private void StopKeepAlive()
+        private void StopKeepAlive([System.Runtime.CompilerServices.CallerMemberName] string caller = "")
         {
-            _keepAlive?.Dispose();
-            _keepAlive = null;
+            if (_keepAlive != null)
+            {
+                Logger.Log($"StopKeepAlive: called from {caller}");
+                _keepAlive.Dispose();
+                _keepAlive = null;
+            }
         }
 
         private void ChkKeepAlive_CheckedChanged(object sender, EventArgs e)
