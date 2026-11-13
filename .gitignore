@@ -10,6 +10,8 @@ HTPCAVRVolumeConfig.txt
 src/
 gitsetup.bat
 gitsetup_out.txt
+gitpush.bat
+build_out.txt
 
 # User-specific files
 *.rsuser

@@ -31,7 +31,7 @@ Adding support for another AVR is straightforward — see [Adding a new AVR](#ad
 
 ## How To Use
 
-1. Download the latest release and run `HTPCAVRVolume.exe`
+1. Download the latest release and run `HTPC-AVR-sync.exe`
 2. Select your AVR model from the dropdown and enter its IP address
 3. Optionally enter your TV's IP address for power sync
 4. Click **Save** — the app will minimise to the tray and start working immediately
@@ -55,7 +55,7 @@ Requires Visual Studio 2019+ or the .NET Framework 4.7.2 SDK.
 .\build.ps1 -Configuration Release
 ```
 
-Output: `bin\<Configuration>\HTPCAVRVolume.exe`
+Output: `bin\<Configuration>\HTPC-AVR-sync.exe`
 
 ## Credits
 
@@ -70,7 +70,7 @@ The following was built on top of that foundation:
 - **Dynamic volume range** — the Denon's actual floor and ceiling are learned from the `MVMAX` response on connect; no more hard-coded limits that cause the AVR to silently ignore out-of-range commands
 - **60-second keep-alive** — a periodic `PW?` ping prevents the AVR's network interface from entering deep sleep and dropping the HDMI handshake
 - **TV power sync** — polls a Samsung TV's REST API every 5 seconds; when the TV turns on, the AVR powers on after a 2-second delay (so the GPU sees the TV's EDID before the AVR comes online, preventing Windows from defaulting to a generic 1024×768 resolution); powers off when the TV does. Since v3.1 a probe is tri-state: a parsed "standby" powers the AVR off at once, but a timeout counts as *unknown* and only three consecutive failures (~15 s) are treated as a real power-off. That preserves the off-at-the-wall case while fixing a roughly weekly false PowerOff, where a single slow response from the TV's REST service dropped the AVR under a TV that had never left "on" and cost a ~3 s HDMI blip
-- **Auto-reconnect** — if the TCP connection drops, the app reconnects automatically after 10 seconds
+- **Auto-reconnect** — if the TCP connection drops, the app reconnects automatically after 10 seconds, retrying every 10 seconds until the AVR answers. Since v3.2 this also covers the AVR closing the session cleanly (e.g. rebooting after an unattended firmware update), which earlier versions mistook for a live connection: they kept sending keep-alives into a dead socket and the volume keys stopped working until the app was restarted. A failed keep-alive write now also drops the connection and reconnects instead of being silently ignored
 - **Headphone detection** — monitors the Windows default audio endpoint via Core Audio COM; hotkeys are automatically suspended when headphones or any non-AVR output is active and resumed when the AVR output comes back
 - **Graceful error handling** — no message boxes; errors are logged in the UI; a tray notification only appears after 30 consecutive seconds of AVR failures
 - **Start with Windows** — one-click autostart via the registry, exposed as a checkbox in the UI
