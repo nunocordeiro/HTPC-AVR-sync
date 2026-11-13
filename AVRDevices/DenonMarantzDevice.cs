@@ -64,11 +64,12 @@ namespace HTPCAVRVolume.AVRDevices
                 if (!task.Wait(3000))
                     throw new TimeoutException($"Timeout connecting to {_ip}:23");
 
-                _stream = _client.GetStream();
-                _stream.WriteTimeout = 2000;  // prevent SendCmd from blocking indefinitely
+                var stream = _client.GetStream();
+                stream.WriteTimeout = 2000;  // prevent SendCmd from blocking indefinitely
+                _stream = stream;
                 _connected = true;
 
-                _readerThread = new Thread(() => ReadLoop(myGen))
+                _readerThread = new Thread(() => ReadLoop(myGen, stream))
                 {
                     IsBackground = true,
                     Name = "DenonReader"
@@ -106,15 +107,19 @@ namespace HTPCAVRVolume.AVRDevices
 
         // ── Reader loop ───────────────────────────────────────────────────────
 
-        private void ReadLoop(int myGen)
+        private void ReadLoop(int myGen, NetworkStream stream)
         {
             var sb  = new StringBuilder();
             var buf = new byte[256];
+            string reason = "connection closed by AVR";
             try
             {
                 while (!_disposed)
                 {
-                    int n = _stream.Read(buf, 0, buf.Length);
+                    int n = stream.Read(buf, 0, buf.Length);
+                    // 0 = the AVR closed the socket cleanly (e.g. it rebooted after
+                    // a firmware update). That is a disconnect, not a normal exit:
+                    // fall through to the reconnect below.
                     if (n == 0) break;
 
                     sb.Append(Encoding.ASCII.GetString(buf, 0, n));
@@ -128,14 +133,23 @@ namespace HTPCAVRVolume.AVRDevices
                     }
                 }
             }
-            catch (Exception) when (_disposed) { }
-            catch (Exception ex)
-            {
-                if (myGen != _connectionGeneration) return;
-                _connected = false;
-                StatusChanged?.Invoke($"AVR disconnected: {ex.Message}");
-                ScheduleReconnect();
-            }
+            catch (Exception) when (_disposed) { return; }
+            catch (Exception ex) { reason = ex.Message; }
+
+            // Disposed, or a newer connection already replaced this one.
+            if (_disposed || myGen != _connectionGeneration) return;
+            _connected = false;
+            Logger.Log($"AVR disconnected: {reason}");
+            StatusChanged?.Invoke($"AVR disconnected: {reason}");
+            ScheduleReconnect();
+        }
+
+        // Called when a write fails. Closing the stream unblocks the reader
+        // thread's Read(), which then reports the disconnect and reconnects.
+        private void DropConnection()
+        {
+            _connected = false;
+            try { _stream?.Close(); } catch { }
         }
 
         private void ProcessLine(string line)
@@ -223,8 +237,7 @@ namespace HTPCAVRVolume.AVRDevices
                 {
                     StatusChanged?.Invoke($"AVR volume error: {ex.Message}");
                     // Close the stream so the reader thread notices and triggers reconnect.
-                    _connected = false;
-                    try { _stream?.Close(); } catch { }
+                    DropConnection();
                 }
             }
             finally
@@ -264,7 +277,15 @@ namespace HTPCAVRVolume.AVRDevices
         private void TrySend(string cmd)
         {
             if (!_connected) return;
-            try { SendCmd(cmd); } catch { }
+            // A failed write (e.g. the keep-alive PW? after the AVR vanished without
+            // closing the socket) means the connection is dead: drop it so the
+            // reader reconnects, instead of silently writing into a dead socket.
+            try { SendCmd(cmd); }
+            catch (Exception ex)
+            {
+                Logger.Log($"AVR send '{cmd}' failed: {ex.Message}");
+                DropConnection();
+            }
         }
 
         // ── IDisposable ───────────────────────────────────────────────────────
