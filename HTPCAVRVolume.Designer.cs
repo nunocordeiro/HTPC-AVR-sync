@@ -41,6 +41,7 @@
             this.lblAudioStatus = new System.Windows.Forms.Label();
             this.chkStartWithWindows = new System.Windows.Forms.CheckBox();
             this.chkKeepAlive = new System.Windows.Forms.CheckBox();
+            this.chkPotPlayerSync = new System.Windows.Forms.CheckBox();
             this.lblTVIP = new System.Windows.Forms.Label();
             this.tbTVIP = new System.Windows.Forms.TextBox();
             this.lblTVStatus = new System.Windows.Forms.Label();
@@ -167,10 +168,21 @@
             this.chkKeepAlive.UseVisualStyleBackColor = true;
             this.chkKeepAlive.CheckedChanged += new System.EventHandler(this.ChkKeepAlive_CheckedChanged);
             //
+            // chkPotPlayerSync
+            //
+            this.chkPotPlayerSync.AutoSize = true;
+            this.chkPotPlayerSync.Location = new System.Drawing.Point(12, 156);
+            this.chkPotPlayerSync.Name = "chkPotPlayerSync";
+            this.chkPotPlayerSync.Size = new System.Drawing.Size(240, 17);
+            this.chkPotPlayerSync.TabIndex = 18;
+            this.chkPotPlayerSync.Text = "PotPlayer: pass-through only on the AVR output";
+            this.chkPotPlayerSync.UseVisualStyleBackColor = true;
+            this.chkPotPlayerSync.CheckedChanged += new System.EventHandler(this.ChkPotPlayerSync_CheckedChanged);
+            //
             // lblTVIP
             //
             this.lblTVIP.AutoSize = true;
-            this.lblTVIP.Location = new System.Drawing.Point(12, 165);
+            this.lblTVIP.Location = new System.Drawing.Point(12, 185);
             this.lblTVIP.Name = "lblTVIP";
             this.lblTVIP.Size = new System.Drawing.Size(35, 13);
             this.lblTVIP.TabIndex = 11;
@@ -178,7 +190,7 @@
             //
             // tbTVIP
             //
-            this.tbTVIP.Location = new System.Drawing.Point(62, 162);
+            this.tbTVIP.Location = new System.Drawing.Point(62, 182);
             this.tbTVIP.Name = "tbTVIP";
             this.tbTVIP.Size = new System.Drawing.Size(131, 20);
             this.tbTVIP.TabIndex = 12;
@@ -186,7 +198,7 @@
             // lblTVStatus
             //
             this.lblTVStatus.AutoSize = false;
-            this.lblTVStatus.Location = new System.Drawing.Point(12, 189);
+            this.lblTVStatus.Location = new System.Drawing.Point(12, 209);
             this.lblTVStatus.Name = "lblTVStatus";
             this.lblTVStatus.Size = new System.Drawing.Size(270, 13);
             this.lblTVStatus.TabIndex = 13;
@@ -194,7 +206,7 @@
             //
             // btnAVROn
             //
-            this.btnAVROn.Location = new System.Drawing.Point(12, 208);
+            this.btnAVROn.Location = new System.Drawing.Point(12, 228);
             this.btnAVROn.Name = "btnAVROn";
             this.btnAVROn.Size = new System.Drawing.Size(80, 25);
             this.btnAVROn.TabIndex = 14;
@@ -204,7 +216,7 @@
             //
             // btnAVROff
             //
-            this.btnAVROff.Location = new System.Drawing.Point(100, 208);
+            this.btnAVROff.Location = new System.Drawing.Point(100, 228);
             this.btnAVROff.Name = "btnAVROff";
             this.btnAVROff.Size = new System.Drawing.Size(80, 25);
             this.btnAVROff.TabIndex = 15;
@@ -214,7 +226,7 @@
             //
             // rtbLog
             //
-            this.rtbLog.Location = new System.Drawing.Point(12, 240);
+            this.rtbLog.Location = new System.Drawing.Point(12, 260);
             this.rtbLog.Name = "rtbLog";
             this.rtbLog.ReadOnly = true;
             this.rtbLog.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical;
@@ -227,13 +239,14 @@
             //
             // HTPCAVRVolume
             //
-            this.ClientSize = new System.Drawing.Size(294, 315);
+            this.ClientSize = new System.Drawing.Size(294, 335);
             this.Controls.Add(this.rtbLog);
             this.Controls.Add(this.btnAVROff);
             this.Controls.Add(this.btnAVROn);
             this.Controls.Add(this.lblTVStatus);
             this.Controls.Add(this.tbTVIP);
             this.Controls.Add(this.lblTVIP);
+            this.Controls.Add(this.chkPotPlayerSync);
             this.Controls.Add(this.chkKeepAlive);
             this.Controls.Add(this.chkStartWithWindows);
             this.Controls.Add(this.lblAudioStatus);
@@ -273,6 +286,7 @@
         private System.Windows.Forms.Label lblAudioStatus;
         private System.Windows.Forms.CheckBox chkStartWithWindows;
         private System.Windows.Forms.CheckBox chkKeepAlive;
+        private System.Windows.Forms.CheckBox chkPotPlayerSync;
         private System.Windows.Forms.Label lblTVIP;
         private System.Windows.Forms.TextBox tbTVIP;
         private System.Windows.Forms.Label lblTVStatus;

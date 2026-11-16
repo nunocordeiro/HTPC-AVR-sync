@@ -15,6 +15,7 @@ When you use audio bit-streaming (Dolby TrueHD, DTS-HD, Atmos, etc.), Windows' o
 - **Start with Windows** — optional autostart via a checkbox (no manual registry editing)
 - **Mute sync** — mute state is queried from the AVR before each toggle, so it stays in sync even if you mute from the AVR's own remote
 - **Keep audio device alive** — optional checkbox opens a silent background audio stream on the AVR endpoint, preventing Windows from power-gating the driver between playback sessions; exclusive-mode apps (bit-streaming players) are detected and the stream yields automatically, then re-opens when the app is done
+- **PotPlayer pass-through sync** — optional checkbox (off by default): PotPlayer bit-streams to the AVR but decodes to PCM on headphones or any other output, so a Dolby/DTS bitstream never reaches a device that cannot decode it. See [PotPlayer pass-through sync](#potplayer-pass-through-sync)
 - **Graceful error handling** — failed commands are logged in the UI; a tray alert only fires after 30 seconds of continuous failures
 
 ## Supported AVRs
@@ -38,6 +39,22 @@ Adding support for another AVR is straightforward — see [Adding a new AVR](#ad
 5. Check **Start with Windows** if you want the app to launch automatically on boot
 
 The volume log at the bottom of the window shows recent events (errors, TV state changes, audio device switches) when the window is open.
+
+## PotPlayer pass-through sync
+
+PotPlayer follows the Windows default output device, but its per-codec pass-through (bit-stream) switches are global. A bitstream the AVR decodes happily (AC3, E-AC3, TrueHD/Atmos ...) comes out of Bluetooth headphones as silence or loud clicking. Tick **PotPlayer: pass-through only on the AVR output** and the app keeps the two in step:
+
+- **AVR is the default output** → the pass-through switches are restored
+- **Any other output** (headphones, monitor speakers, an unknown device) → they are turned off and PotPlayer decodes to PCM, which every device can play
+
+Things to know:
+
+- It needs the AVR audio device to be saved (click **Save** while the AVR is the default output), the same as headphone detection.
+- PotPlayer reads its settings when it starts and writes them back when it exits, so the app only changes them **while PotPlayer is closed**. If you switch output in the middle of a file, restart PotPlayer.
+- The set of switches to restore is **learned**: whatever pass-through you have enabled in PotPlayer (Preferences → Audio → Pass-through) while the AVR is the default output is remembered. Change it there while on the AVR and the change sticks; a change made while on another output is overwritten.
+- Nothing is polled. The app reacts to the default-output change it already tracks, to a change notification on PotPlayer's settings key, and to PotPlayer exiting.
+- Un-ticking the option puts the learned switches back (once PotPlayer is closed) and then leaves PotPlayer alone.
+- Scope: the 64-bit PotPlayer with settings in the registry (`HKCU\Software\DAUM\PotPlayerMini64\Settings`, values with `Spdif` in the name). The 32-bit build and INI-file (portable) setups are not handled. The learned state is kept in `HTPCAVRVolumePotPlayer.txt` next to the exe.
 
 ## Adding a new AVR
 
@@ -78,4 +95,5 @@ The following was built on top of that foundation:
 - **Audio device persistence** — the selected audio device's friendly name is saved alongside its GUID; if Windows reassigns the GUID on reboot or driver update, the app resolves the correct device by name automatically without any user action
 - **Hotkey retry** — if hotkey registration fails at startup (another app momentarily holds the keys), the app retries silently every 5 seconds until it succeeds
 - **Keep audio device alive** — a silent WASAPI shared-mode stream is held open on the AVR audio endpoint (opt-in checkbox) to prevent the Windows audio driver from power-gating the device between playback sessions; when an exclusive-mode application (e.g. a bit-streaming media player) takes the device, the keep-alive detects the session disconnect, yields cleanly, and reattaches automatically 10 seconds after the exclusive app releases the device (inspired by [soundkeeper](https://github.com/vrubleg/soundkeeper) by [vrubleg](https://github.com/vrubleg))
+- **PotPlayer pass-through sync** (v3.3, opt-in) — PotPlayer's pass-through switches follow the default output: on for the AVR, off (PCM) for everything else; event-driven, and it only writes while PotPlayer is closed. v3.3 also stops the automatic device-GUID update from dropping the *Keep audio device alive* setting from the config file
 - **Log rotation and trimming** — the log file is rotated to a `.bak` on startup if it exceeds 200 KB; a mid-session trim kicks in every 500 log writes and keeps only the most recent 1,000 lines if the file grows past 500 KB, so the log never grows unbounded even during weeks-long sessions

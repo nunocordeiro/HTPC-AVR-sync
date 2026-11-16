@@ -27,6 +27,8 @@ namespace HTPCAVRVolume
         private VolumeOSD _volumeOSD;
         private AudioKeepAlive _keepAlive;
         private string _avrAudioDeviceId;   // resolved device ID for the AVR audio endpoint
+        private PotPlayerPassthrough _potPlayerSync;
+        private bool _loadingConfig;
 
         public HTPCAVRVolume()
         {
@@ -128,6 +130,7 @@ namespace HTPCAVRVolume
                 string audioDeviceName = null;
                 string tvIp    = null;
                 bool keepAlive = false;
+                bool potPlayerSync = false;
                 for (int i = 1; i < lines.Length; i++)
                 {
                     int eq = lines[i].IndexOf('=');
@@ -143,11 +146,16 @@ namespace HTPCAVRVolume
                     }
                     if (key == "TVIP")      tvIp    = val;
                     if (key == "KeepAlive") keepAlive = val == "1";
+                    if (key == "PotPlayerSync") potPlayerSync = val == "1";
                 }
 
                 if (tvIp != null) tbTVIP.Text = tvIp;
                 chkKeepAlive.Checked = keepAlive;
+                _loadingConfig = true;
+                chkPotPlayerSync.Checked = potPlayerSync;
+                _loadingConfig = false;
                 StartAudioMonitoring(audioDeviceId, audioDeviceName);
+                ApplyPotPlayerSync();
                 StartTVMonitoring(tvIp);
                 return true;
             }
@@ -289,6 +297,7 @@ namespace HTPCAVRVolume
                 timer.Start();
 
                 StartKeepAliveIfEnabled();
+                _potPlayerSync?.RequestSync();
                 Logger.Log("OnAVRBecameActive: done");
             }
             catch (Exception ex)
@@ -305,6 +314,7 @@ namespace HTPCAVRVolume
                 UnregisterHotkeys();
                 StopKeepAlive();
                 UpdateAudioStatus("Inactive (hotkeys paused)");
+                _potPlayerSync?.RequestSync();
                 Logger.Log("OnAVRBecameInactive: done");
             }
             catch (Exception ex)
@@ -340,6 +350,45 @@ namespace HTPCAVRVolume
                 if (chkKeepAlive.Checked) StartKeepAliveIfEnabled();
                 else                      StopKeepAlive();
             }
+        }
+
+        // ── PotPlayer pass-through sync (opt-in) ──────────────────────────────
+
+        private void ChkPotPlayerSync_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_loadingConfig) return;
+            SetConfigValue("PotPlayerSync", chkPotPlayerSync.Checked ? "1" : "0");
+            ApplyPotPlayerSync();
+        }
+
+        private void ApplyPotPlayerSync()
+        {
+            if (chkPotPlayerSync.Checked)
+            {
+                if (_potPlayerSync == null)
+                {
+                    string statePath = Path.Combine(Path.GetDirectoryName(_configPath), "HTPCAVRVolumePotPlayer.txt");
+                    _potPlayerSync = new PotPlayerPassthrough(IsAVROutputActive, AppendLog, statePath);
+                }
+                if (_audioMonitor == null)
+                    AppendLog("PotPlayer pass-through sync needs the AVR audio device: click Save while the AVR is the default output");
+                _potPlayerSync.SetEnabled(true);
+                _potPlayerSync.RequestSync();
+            }
+            else
+            {
+                _potPlayerSync?.SetEnabled(false);
+            }
+        }
+
+        // Reuses the default-endpoint tracking that pauses the hotkeys. null = cannot tell
+        // (no AVR audio device saved, or no output device at all): leave PotPlayer alone.
+        private bool? IsAVROutputActive()
+        {
+            AudioDeviceMonitor monitor = _audioMonitor;
+            if (monitor == null) return null;
+            if (AudioDeviceMonitor.GetCurrentDefaultDeviceId() == null) return null;
+            return monitor.IsAVRActive;
         }
 
         private void UpdateAudioStatus(string status)
@@ -380,15 +429,39 @@ namespace HTPCAVRVolume
         {
             try
             {
-                // Re-read current config to preserve AVR type/IP/TVIP, only update AudioDevice line
-                string[] lines = File.Exists(_configPath) ? File.ReadAllLines(_configPath) : new string[0];
-                string avrLine  = lines.Length > 0 ? lines[0] : (cmbDevice.SelectedItem?.ToString() + "=" + tbIP.Text);
-                string tvLine   = "TVIP=" + tbTVIP.Text.Trim();
                 string audioVal = string.IsNullOrEmpty(deviceName) ? deviceId : deviceId + "|" + deviceName;
+                if (File.Exists(_configPath))
+                {
+                    SetConfigValue("AudioDevice", audioVal);
+                    return;
+                }
                 File.WriteAllText(_configPath,
-                    avrLine + "\r\nAudioDevice=" + audioVal + "\r\n" + tvLine);
+                    cmbDevice.SelectedItem?.ToString() + "=" + tbIP.Text
+                    + "\r\nAudioDevice=" + audioVal + "\r\nTVIP=" + tbTVIP.Text.Trim());
             }
             catch { }
+        }
+
+        // Replaces (or appends) one key=value line of an existing config, leaving the first line
+        // (AVR type and IP) and every other setting as they are.
+        private void SetConfigValue(string key, string value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return;   // nothing saved yet: Save writes everything
+                var lines = new System.Collections.Generic.List<string>(File.ReadAllLines(_configPath));
+                if (lines.Count == 0) return;
+                bool replaced = false;
+                for (int i = 1; i < lines.Count; i++)
+                {
+                    if (!lines[i].StartsWith(key + "=")) continue;
+                    lines[i] = key + "=" + value;
+                    replaced = true;
+                }
+                if (!replaced) lines.Add(key + "=" + value);
+                File.WriteAllText(_configPath, string.Join("\r\n", lines));
+            }
+            catch (Exception ex) { Logger.LogException("SetConfigValue", ex); }
         }
 
         private void BtnSave_Click(object sender, EventArgs e)
@@ -403,7 +476,8 @@ namespace HTPCAVRVolume
                 string configText = cmbDevice.SelectedItem.ToString() + "=" + tbIP.Text
                     + "\r\nAudioDevice=" + audioVal
                     + "\r\nTVIP=" + tbTVIP.Text.Trim()
-                    + "\r\nKeepAlive=" + (chkKeepAlive.Checked ? "1" : "0");
+                    + "\r\nKeepAlive=" + (chkKeepAlive.Checked ? "1" : "0")
+                    + "\r\nPotPlayerSync=" + (chkPotPlayerSync.Checked ? "1" : "0");
                 File.WriteAllText(_configPath, configText);
                 Logger.Log($"Saved audio device: {audioDeviceName} ({audioDeviceId})");
                 LoadDevice();
@@ -507,6 +581,7 @@ namespace HTPCAVRVolume
         private void HTPCAVRVolume_FormClosed(object sender, FormClosedEventArgs e)
         {
             _tvMonitor?.Dispose();
+            _potPlayerSync?.Dispose();
             _audioMonitor?.Dispose();
             (_AVR as IDisposable)?.Dispose();
             _volumeOSD?.Dispose();
