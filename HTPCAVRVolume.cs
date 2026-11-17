@@ -230,6 +230,18 @@ namespace HTPCAVRVolume
 
             _avrAudioDeviceId = resolvedId ?? audioDeviceId;
 
+            // Configs saved before v3.4 have no device name (the lookup was broken), which leaves the
+            // find-by-name recovery nothing to match. Record it now while the ID is still valid.
+            if (string.IsNullOrEmpty(audioDeviceName))
+            {
+                string name = AudioDeviceMonitor.GetDeviceFriendlyName(_avrAudioDeviceId);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    AppendLog($"AVR audio device name recorded: {name}");
+                    SaveAudioDeviceToConfig(_avrAudioDeviceId, name);
+                }
+            }
+
             if (_audioMonitor.IsAVRActive)
             {
                 RegisterHotkeys();
@@ -464,22 +476,75 @@ namespace HTPCAVRVolume
             catch (Exception ex) { Logger.LogException("SetConfigValue", ex); }
         }
 
+        // The AudioDevice value currently in the config ("id|name" or a bare id), or null.
+        private string ReadSavedAudioDevice()
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return null;
+                foreach (string line in File.ReadAllLines(_configPath))
+                    if (line.StartsWith("AudioDevice=")) return line.Substring("AudioDevice=".Length);
+            }
+            catch (Exception ex) { Logger.LogException("ReadSavedAudioDevice", ex); }
+            return null;
+        }
+
+        // Save binds "the AVR output" to whatever is the Windows default right now. Clicking it while
+        // headphones are the default used to make the app treat the headphones as the AVR: volume
+        // keys went to the AVR and PotPlayer kept bit-streaming to the headphones. So when the
+        // default is not the saved AVR output, ask. Returns the AudioDevice value to write, or null
+        // to cancel the save.
+        private string ChooseAudioDeviceForSave()
+        {
+            string savedVal  = ReadSavedAudioDevice();
+            string savedId   = savedVal;
+            string savedName = null;
+            int pipe = savedVal?.IndexOf('|') ?? -1;
+            if (pipe >= 0) { savedId = savedVal.Substring(0, pipe); savedName = savedVal.Substring(pipe + 1); }
+
+            string currentId = AudioDeviceMonitor.GetCurrentDefaultDeviceId();
+            if (string.IsNullOrEmpty(currentId))
+            {
+                // No output device at all: keep what is saved rather than clearing it.
+                Logger.Log("Save: no default output device - keeping the saved audio device");
+                return savedVal ?? "";
+            }
+
+            string currentName = AudioDeviceMonitor.GetDeviceFriendlyName(currentId);
+            string currentVal  = string.IsNullOrEmpty(currentName) ? currentId : currentId + "|" + currentName;
+
+            // First save, or the AVR is the default output: nothing to ask.
+            if (string.IsNullOrEmpty(savedId) || savedId == currentId) return currentVal;
+
+            string savedLabel = AudioDeviceMonitor.GetDeviceFriendlyName(savedId) ?? savedName ?? savedId;
+            string currentLabel = currentName ?? currentId;
+            DialogResult answer = MessageBox.Show(this,
+                $"The default audio output is \"{currentLabel}\", not the saved AVR output \"{savedLabel}\".\n\n" +
+                $"Yes: use \"{currentLabel}\" as the AVR output from now on.\n" +
+                $"No: keep \"{savedLabel}\" and save the other settings.\n" +
+                "Cancel: do not save.",
+                "HTPC-AVR-sync: change the AVR output?",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+
+            Logger.Log($"Save: default '{currentLabel}' differs from saved '{savedLabel}' - answer {answer}");
+            if (answer == DialogResult.Yes) return currentVal;
+            if (answer == DialogResult.No)  return savedVal;
+            return null;
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             try
             {
-                string audioDeviceId   = AudioDeviceMonitor.GetCurrentDefaultDeviceId() ?? "";
-                string audioDeviceName = AudioDeviceMonitor.GetDeviceFriendlyName(audioDeviceId) ?? "";
-                string audioVal        = string.IsNullOrEmpty(audioDeviceName)
-                    ? audioDeviceId
-                    : audioDeviceId + "|" + audioDeviceName;
+                string audioVal = ChooseAudioDeviceForSave();
+                if (audioVal == null) return;
                 string configText = cmbDevice.SelectedItem.ToString() + "=" + tbIP.Text
                     + "\r\nAudioDevice=" + audioVal
                     + "\r\nTVIP=" + tbTVIP.Text.Trim()
                     + "\r\nKeepAlive=" + (chkKeepAlive.Checked ? "1" : "0")
                     + "\r\nPotPlayerSync=" + (chkPotPlayerSync.Checked ? "1" : "0");
                 File.WriteAllText(_configPath, configText);
-                Logger.Log($"Saved audio device: {audioDeviceName} ({audioDeviceId})");
+                Logger.Log($"Saved audio device: {audioVal}");
                 LoadDevice();
             }
             catch

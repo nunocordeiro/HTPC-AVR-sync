@@ -21,19 +21,12 @@ namespace HTPCAVRVolume
     {
         [PreserveSig] int GetCount(out uint cProps);
         [PreserveSig] int GetAt(uint iProp, out PropertyKey pkey);
-        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant pv);
-        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant propvar);
+        // pv is a caller-allocated PROPVARIANT (24 bytes on x64, 16 on x86): see GetFriendlyName
+        [PreserveSig] int GetValue(ref PropertyKey key, IntPtr pv);
+        [PreserveSig] int SetValue(ref PropertyKey key, IntPtr propvar);
         [PreserveSig] int Commit();
     }
 
-    [StructLayout(LayoutKind.Explicit)]
-    internal struct PropVariant
-    {
-        [FieldOffset(0)] public ushort vt;
-        [FieldOffset(8)] public IntPtr pwszVal;
-        // VT_LPWSTR = 31
-        public string AsString() => vt == 31 ? Marshal.PtrToStringUni(pwszVal) : null;
-    }
 
     [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceEnumerator
@@ -178,18 +171,39 @@ namespace HTPCAVRVolume
             catch { return null; }
         }
 
+        [DllImport("ole32.dll")]
+        private static extern int PropVariantClear(IntPtr pvar);
+
+        private const int PropVariantBufferSize = 32;   // >= sizeof(PROPVARIANT) on x86 (16) and x64 (24)
+        private const ushort VtLpwstr = 31;
+
+        // Before v3.4 the PROPVARIANT was a 16-byte managed struct. On x64 Windows writes 24 bytes,
+        // the lookup failed every time, and Save stored a blank device name, which also disabled
+        // the find-by-name recovery when Windows gives the AVR endpoint a new ID.
         private static string GetFriendlyName(IMMDevice device)
         {
+            IPropertyStore store = null;
+            IntPtr pv = IntPtr.Zero;
             try
             {
                 var key = PkeyFriendlyName;
-                if (device.OpenPropertyStore(0 /*STGM_READ*/, out IPropertyStore store) != 0) return null;
-                store.GetValue(ref key, out PropVariant pv);
-                string name = pv.AsString();
-                Marshal.ReleaseComObject(store);
-                return name;
+                if (device.OpenPropertyStore(0 /*STGM_READ*/, out store) != 0) return null;
+                pv = Marshal.AllocCoTaskMem(PropVariantBufferSize);
+                for (int i = 0; i < PropVariantBufferSize; i++) Marshal.WriteByte(pv, i, 0);
+                if (store.GetValue(ref key, pv) != 0) return null;
+                if ((ushort)Marshal.ReadInt16(pv) != VtLpwstr) return null;
+                return Marshal.PtrToStringUni(Marshal.ReadIntPtr(pv, 8));
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                Logger.Log($"GetFriendlyName failed: {ex.GetType().Name}: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                if (pv != IntPtr.Zero) { PropVariantClear(pv); Marshal.FreeCoTaskMem(pv); }
+                if (store != null) Marshal.ReleaseComObject(store);
+            }
         }
 
         // Returns the device ID of the first active render endpoint whose friendly

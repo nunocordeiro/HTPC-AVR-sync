@@ -35,7 +35,7 @@ Adding support for another AVR is straightforward — see [Adding a new AVR](#ad
 1. Download the latest release and run `HTPC-AVR-sync.exe`
 2. Select your AVR model from the dropdown and enter its IP address
 3. Optionally enter your TV's IP address for power sync
-4. Click **Save** — the app will minimise to the tray and start working immediately
+4. Click **Save** while the AVR is the Windows default output — the app remembers that output as "the AVR", minimises to the tray and starts working immediately. If you click Save later while another output (e.g. headphones) is the default, the app asks before replacing the saved AVR output
 5. Check **Start with Windows** if you want the app to launch automatically on boot
 
 The volume log at the bottom of the window shows recent events (errors, TV state changes, audio device switches) when the window is open.
@@ -96,4 +96,5 @@ The following was built on top of that foundation:
 - **Hotkey retry** — if hotkey registration fails at startup (another app momentarily holds the keys), the app retries silently every 5 seconds until it succeeds
 - **Keep audio device alive** — a silent WASAPI shared-mode stream is held open on the AVR audio endpoint (opt-in checkbox) to prevent the Windows audio driver from power-gating the device between playback sessions; when an exclusive-mode application (e.g. a bit-streaming media player) takes the device, the keep-alive detects the session disconnect, yields cleanly, and reattaches automatically 10 seconds after the exclusive app releases the device (inspired by [soundkeeper](https://github.com/vrubleg/soundkeeper) by [vrubleg](https://github.com/vrubleg))
 - **PotPlayer pass-through sync** (v3.3, opt-in) — PotPlayer's pass-through switches follow the default output: on for the AVR, off (PCM) for everything else; event-driven, and it only writes while PotPlayer is closed. v3.3 also stops the automatic device-GUID update from dropping the *Keep audio device alive* setting from the config file
+- **Safer Save** (v3.4) — Save asks before replacing the saved AVR output with a different default device (*Yes* = use it, *No* = keep the AVR and save the other settings, *Cancel*), and keeps the saved device when there is no default output at all. Also fixes the device-name lookup, which failed on 64-bit Windows: Save stored a blank name, so the find-by-name recovery after Windows renumbers the AVR endpoint never had anything to match. A config saved without a name gets it filled in at the next start
 - **Log rotation and trimming** — the log file is rotated to a `.bak` on startup if it exceeds 200 KB; a mid-session trim kicks in every 500 log writes and keeps only the most recent 1,000 lines if the file grows past 500 KB, so the log never grows unbounded even during weeks-long sessions
